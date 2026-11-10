@@ -249,22 +249,87 @@ def predict_tomorrow_stress(df: pd.DataFrame) -> dict:
 
 
 # ---------------------------------------------------------
-# 3. データ初期化（サンプルなしのクリーンな状態からスタート）
+# 3. 認証 & ユーザー別データの初期化（ここに置き換え）
 # ---------------------------------------------------------
-if "df" not in st.session_state:
-    today = datetime.now().date()
-    # 初回は架空のサンプルデータを入れず、今日の初期行1件のみにする
-    initial_entry = {
-        "日付": today,
-        "歩数": 0,
-        "睡眠時間": 0.0,
-        "主観ストレス度": 3,
-        "メモ": "まだ記録がありません。サイドバーからきょうの記録を入力してみましょう！",
-        "ストレス指標": 50.0,
-        "リスク判定": "良好",
-        "ストレス要因": "その他・特になし",
-    }
-    st.session_state.df = pd.DataFrame([initial_entry])
+# パスワード認証用のユーザーリスト
+USER_CREDENTIALS = {
+    "user_A": "password123",
+    "user_B": "secret456",
+    "test_user": "testpass"
+}
+
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.current_user = ""
+
+# ユーザーごとのデータフレームを保持する辞書
+if "user_databases" not in st.session_state:
+    st.session_state.user_databases = {}
+
+
+# =========================================================
+# 4. 未ログイン時の画面（ログインフォーム）
+# =========================================================
+if not st.session_state.logged_in:
+    st.title("🔐 ログイン認証")
+    st.write("ストレス可視化セルフケア支援システムをご利用の際は、IDとパスワードを入力してください。")
+    
+    with st.form("login_form"):
+        input_user = st.text_input("ユーザーID")
+        input_pass = st.text_input("パスワード", type="password")
+        submit_btn = st.form_submit_button("ログイン")
+        
+        if submit_btn:
+            if input_user in USER_CREDENTIALS and USER_CREDENTIALS[input_user] == input_pass:
+                st.session_state.logged_in = True
+                st.session_state.current_user = input_user
+                
+                # ログインしたユーザーのデータがまだなければ初期データを作る
+                if input_user not in st.session_state.user_databases:
+                    today = datetime.now().date()
+                    initial_entry = {
+                        "日付": today, "歩数": 0, "睡眠時間": 0.0, "主観ストレス度": 3,
+                        "メモ": "まだ記録がありません。サイドバーから今日の記録を入力してみましょう！",
+                        "ストレス指標": 50.0, "リスク判定": "良好", "ストレス要因": "その他・特になし",
+                    }
+                    st.session_state.user_databases[input_user] = pd.DataFrame([initial_entry])
+                
+                st.success("ログインに成功しました！まもなく画面が切り替わります。")
+                st.rerun()
+            else:
+                st.error("⚠️ ユーザーIDまたはパスワードが間違っています。")
+
+# =========================================================
+# 5. ログイン成功後のメインアプリ画面（元のUIやタブ、サイドバー）
+# =========================================================
+else:
+    user = st.session_state.current_user
+    
+    # サイドバーにログイン中ユーザーとログアウトボタンを表示
+    st.sidebar.success(f"👤 ログイン中: **{user}** さん")
+    if st.sidebar.button("ログアウト"):
+        st.session_state.logged_in = False
+        st.session_state.current_user = ""
+        st.rerun()
+
+    # 1. もしログイン中ユーザーのデータ箱がまだなければ、初期データを作成して用意する
+    if user not in st.session_state.user_databases:
+        today = datetime.now().date()
+        initial_entry = {
+            "日付": today,
+            "歩数": 0,
+            "睡眠時間": 0.0,
+            "主観ストレス度": 3,
+            "メモ": "まだ記録がありません。サイドバーから今日の記録を入力してみましょう！",
+            "ストレス指標": 50.0,
+            "リスク判定": "良好",
+            "ストレス要因": "その他・特になし",
+        }
+        st.session_state.user_databases[user] = pd.DataFrame([initial_entry])
+
+    # 2. ★ここがポイント！
+    # ユーザーごとのデータを、元のUIがそのまま使える `st.session_state.df` に結びつける
+    st.session_state.df = st.session_state.user_databases[user]
 
 # ---------------------------------------------------------
 # 4. サイドバー：日次データ入力フォーム

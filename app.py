@@ -330,3 +330,374 @@ else:
     # 2. ★ここがポイント！
     # ユーザーごとのデータを、元のUIがそのまま使える `st.session_state.df` に結びつける
     st.session_state.df = st.session_state.user_databases[user]
+
+# ---------------------------------------------------------
+# 4. サイドバー：日次データ入力フォーム
+# ---------------------------------------------------------
+st.sidebar.header("📝 きょうの記録")
+input_date = st.sidebar.date_input("日付", datetime.now().date())
+input_steps = st.sidebar.number_input("歩数", min_value=0, max_value=50000, value=7000, step=500)
+input_sleep = st.sidebar.slider("睡眠時間 (時間)", min_value=0.0, max_value=12.0, value=7.0, step=0.5)
+input_stress = st.sidebar.select_slider("気分・ストレス感 (1:低 ～ 5:高)", options=[1, 2, 3, 4, 5], value=3)
+input_memo = st.sidebar.text_area("メモ / 日記", placeholder="例：面接が終わってホッとした。少し疲れた。")
+
+if st.sidebar.button("💾 保存する", type="primary", use_container_width=True):
+    res = calculate_health_scores(input_steps, input_sleep, input_stress, input_memo)
+    new_entry = {
+        "日付": input_date,
+        "歩数": input_steps,
+        "睡眠時間": input_sleep,
+        "主観ストレス度": input_stress,
+        "メモ": input_memo,
+        "ストレス指標": res["stress_index"],
+        "リスク判定": res["risk_level"],
+        "ストレス要因": res["factor"],
+    }
+    df = st.session_state.df
+    if input_date in df["日付"].values:
+        df.loc[df["日付"] == input_date, :] = list(new_entry.values())
+    else:
+        df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+    st.session_state.df = df.sort_values("日付").reset_index(drop=True)
+    st.sidebar.success("保存しました！")
+
+# ---------------------------------------------------------
+# 5. メイン画面
+# ---------------------------------------------------------
+latest_row = st.session_state.df.iloc[-1]
+latest_calc = calculate_health_scores(
+    latest_row["歩数"], latest_row["睡眠時間"], latest_row["主観ストレス度"], latest_row["メモ"]
+)
+
+render(f"""
+<div class="app-head">
+<div class="app-emoji">🧘</div>
+<div>
+<div class="app-title">ヘルスケア分析</div>
+<div class="app-sub">最終記録：{fmt_date(latest_row['日付'])}</div>
+</div>
+</div>
+""")
+
+tab1, tab2, tab3, tab4 = st.tabs(["🌷 TOP", "🔮 予測", "🍰 原因", "📒 履歴"])
+
+# ---------------------------------------------------------
+# Tab 1: きょうの要約
+# ---------------------------------------------------------
+with tab1:
+    sc = STATUS[latest_calc["status_color"]]
+    idx = latest_calc["stress_index"]
+
+    render(f"""
+    <div class="hero" style="background:{sc['soft']};">
+    <div class="ring" style="background:conic-gradient({sc['main']} {idx}%, rgba(255,255,255,.75) 0);">
+    <div class="ring-inner"><div>
+    <div class="ring-num">{idx:.0f}</div>
+    <div class="ring-sub">ストレス指標</div>
+    </div></div>
+    </div>
+    <div class="hero-text">
+    <div class="face">{sc['face']}</div>
+    <div class="hero-title">{sc['title']}</div>
+    <div class="hero-msg">{sc['msg']}</div>
+    <span class="pill">状態：{latest_calc['risk_level']}</span>
+    </div>
+    </div>
+    """)
+
+    steps_pct = min(100.0, latest_calc["steps_score"])
+    sleep_pct = min(100.0, latest_calc["sleep_score"])
+    render(f"""
+    <div class="grid2">
+    <div class="stat">
+    <div class="stat-head"><span class="bubble" style="background:#FFE9D6;">👟</span><span class="stat-label">歩数</span></div>
+    <div class="stat-value">{latest_row['歩数']:,}<small>歩</small></div>
+    <div class="bar"><i style="width:{steps_pct}%; background:#FFB48A;"></i></div>
+    <div class="stat-sub">目標8,000歩の {latest_calc['steps_score']:.0f}%</div>
+    </div>
+    <div class="stat">
+    <div class="stat-head"><span class="bubble" style="background:#E3EEFF;">🌙</span><span class="stat-label">睡眠時間</span></div>
+    <div class="stat-value">{latest_row['睡眠時間']}<small>時間</small></div>
+    <div class="bar"><i style="width:{sleep_pct}%; background:#9DB8FF;"></i></div>
+    <div class="stat-sub">充足度 {latest_calc['sleep_score']:.0f}%</div>
+    </div>
+    </div>
+    """)
+
+    memo_text = html.escape(str(latest_row["メモ"])) if latest_row["メモ"] else "メモはまだありません"
+    factor = latest_calc["factor"]
+    render(f"""
+    <div class="memo">
+    <div class="memo-label">💭 きょうのメモ</div>
+    <div class="memo-text">{memo_text}</div>
+    <span class="chip">{FACTOR_EMOJI.get(factor, '☁️')} {factor}</span>
+    </div>
+    """)
+
+    st.subheader("🔔 お知らせ・今日のアドバイス")
+
+    df_today = st.session_state.df.sort_values("日付")
+    latest_row = df_today.iloc[-1]
+    warnings = detect_early_warnings(df_today)
+
+    if warnings:
+        for w in warnings:
+            render(
+                f'<div class="alert alert-warn">'
+                f'{html.escape(w)}</div>'
+            )
+    else:
+        render(
+            '<div class="alert alert-ok">'
+            '✅ 大きな注意サインは検出されていません。'
+            '</div>'
+        )
+
+    advice = []
+    if latest_row["ストレス指標"] >= 70:
+        advice.append(
+            "🌿 ストレス指標が高めです。"
+            "予定を詰め込みすぎず、ゆっくり休む時間を作りましょう。"
+        )
+    elif latest_row["ストレス指標"] >= 45:
+        advice.append(
+            "☕ 少し疲れがたまっているかもしれません。"
+            "短い休憩や深呼吸で気分を切り替えてみましょう。"
+        )
+    else:
+        advice.append(
+            "🌷 今の状態を保てるように、"
+            "無理のない生活リズムを続けてみましょう。"
+        )
+
+    if latest_row["睡眠時間"] < 6 and latest_row["睡眠時間"] > 0:
+        advice.append(
+            "🌙 睡眠時間が短めです。"
+            "今夜は早めに休めるようにしてみましょう。"
+        )
+
+    if latest_row["歩数"] < 4000 and latest_row["歩数"] > 0:
+        advice.append(
+            "🚶 歩数が少なめです。体調に合わせて、"
+            "軽いストレッチや短い散歩を取り入れてみましょう。"
+        )
+
+    render(
+        '<div class="alert alert-ok">'
+        '<strong>💡 今日できるセルフケア</strong><br>'
+        + "<br>".join(html.escape(a) for a in advice)
+        + "</div>"
+    )
+
+    render('<div class="note">※ 表示は記録に基づく一般的なセルフケアの目安です。医療的な診断ではありません。</div>')
+
+
+# ---------------------------------------------------------
+# Tab 2: ストレス予測 & シミュレーター
+# ---------------------------------------------------------
+with tab2:
+    st.subheader("🔮 明日のストレス予測")
+    pred = predict_tomorrow_stress(st.session_state.df)
+    pc = STATUS[status_of(pred["predicted_score"])]
+
+    render(f"""
+    <div class="result" style="background:{pc['soft']};">
+    <div class="result-label">明日の予想スコア</div>
+    <div class="result-value">{pred['predicted_score']}<small> / 100</small></div>
+    <div class="result-sub"><span class="pill">傾向：{pred['trend']}</span></div>
+    </div>
+    """)
+
+    st.subheader("🧪 明日のおためしシミュレーション")
+    st.caption("歩数・睡眠・負荷を動かすと、スコアがどう変わるか見られます。")
+
+    sim_steps = st.number_input("予定歩数", min_value=0, max_value=30000, value=8000, step=1000)
+    sim_sleep = st.slider("予定睡眠時間", min_value=0.0, max_value=12.0, value=7.5, step=0.5)
+    sim_stress = st.select_slider("予想される負荷 (1:低 ～ 5:高)", options=[1, 2, 3, 4, 5], value=2)
+
+    sim_res = calculate_health_scores(sim_steps, sim_sleep, sim_stress, "シミュレーション")
+    diff = sim_res["stress_index"] - latest_calc["stress_index"]
+    diff_text = f"今日より {abs(diff):.1f}pt {'改善' if diff < 0 else '悪化'}"
+    simc = STATUS[status_of(sim_res["stress_index"])]
+
+    render(f"""
+    <div class="result" style="background:{simc['soft']};">
+    <div class="result-label">シミュレーション結果 {simc['face']}</div>
+    <div class="result-value">{sim_res['stress_index']}<small> / 100</small></div>
+    <div class="result-sub"><span class="pill">{diff_text}</span></div>
+    </div>
+    """)
+
+
+# ---------------------------------------------------------
+# Tab 3: 原因の内訳 & 推移
+# ---------------------------------------------------------
+PLOT_CONFIG = {"displayModeBar": False}
+
+
+def base_layout(fig, height):
+    fig.update_layout(
+        font=dict(family=FONT, color=INK, size=13),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(t=10, b=10, l=10, r=10),
+        height=height,
+    )
+
+
+with tab3:
+    df_chart = st.session_state.df.copy()
+
+    st.subheader("🍰 ストレスの原因")
+    factor_counts = df_chart["ストレス要因"].value_counts().reset_index()
+    factor_counts.columns = ["ストレス要因", "件数"]
+    labels = [f"{FACTOR_EMOJI.get(f, '☁️')} {f}" for f in factor_counts["ストレス要因"]]
+
+    fig_pie = go.Figure(go.Pie(
+        labels=labels,
+        values=factor_counts["件数"],
+        hole=0.6,
+        sort=False,
+        marker=dict(colors=PASTELS[: len(labels)], line=dict(color=MILK, width=4)),
+        textinfo="percent",
+        textfont=dict(size=14, color=INK),
+        hovertemplate="%{label}<br>%{value}日<extra></extra>",
+    ))
+    base_layout(fig_pie, 380)
+    fig_pie.update_layout(
+        showlegend=True,
+        legend=dict(orientation="h", y=-0.05, x=0.5, xanchor="center"),
+        annotations=[dict(text=f"{len(df_chart)}日分", x=0.5, y=0.5, showarrow=False,
+                          font=dict(size=18, color=INK))],
+    )
+    st.plotly_chart(fig_pie, use_container_width=True, config=PLOT_CONFIG)
+
+    st.subheader("📈 ストレス指標の推移")
+    fig_line = go.Figure()
+    for y0, y1, col in [(0, 45, "rgba(92,201,160,.18)"), (45, 70, "rgba(255,169,77,.18)"), (70, 100, "rgba(255,122,154,.18)")]:
+        fig_line.add_hrect(y0=y0, y1=y1, fillcolor=col, line_width=0, layer="below")
+    fig_line.add_trace(go.Scatter(
+        x=df_chart["日付"], y=df_chart["ストレス指標"],
+        mode="lines+markers",
+        line=dict(color=PLUM, width=4, shape="spline"),
+        marker=dict(size=11, color="#fff", line=dict(color=PLUM, width=3)),
+        hovertemplate="%{x|%m/%d}<br>ストレス指標 %{y}<extra></extra>",
+    ))
+    base_layout(fig_line, 320)
+    fig_line.update_yaxes(range=[0, 100], tickvals=[0, 45, 70, 100], gridcolor="rgba(75,63,94,.08)",
+                          zeroline=False, fixedrange=True)
+    fig_line.update_xaxes(tickformat="%m/%d", showgrid=False, fixedrange=True)
+    st.plotly_chart(fig_line, use_container_width=True, config=PLOT_CONFIG)
+
+    render("""
+    <div class="legend">
+    <span style="background:#E4F7EE;">🟢 〜44 良好</span>
+    <span style="background:#FFF0DB;">🟡 45〜69 中リスク</span>
+    <span style="background:#FFE3EA;">🔴 70〜 高リスク</span>
+    </div>
+    """)
+
+    st.subheader("📊 主観ストレスとアプリ評価の比較")
+
+    df_compare = df_chart.sort_values("日付").copy()
+    df_compare["主観評価換算"] = (
+        (df_compare["主観ストレス度"] - 1) / 4 * 100
+    )
+
+    fig_compare = go.Figure()
+
+    fig_compare.add_trace(go.Scatter(
+        x=df_compare["日付"],
+        y=df_compare["主観評価換算"],
+        mode="lines+markers",
+        name="主観ストレス（換算）",
+        line=dict(color="#2563EB", width=3),
+        marker=dict(size=8),
+        customdata=df_compare["主観ストレス度"],
+        hovertemplate=(
+            "%{x|%m/%d}<br>"
+            "主観評価：%{customdata} / 5<br>"
+            "換算値：%{y:.1f} / 100"
+            "<extra></extra>"
+        ),
+    ))
+
+    fig_compare.add_trace(go.Scatter(
+        x=df_compare["日付"],
+        y=df_compare["ストレス指標"],
+        mode="lines+markers",
+        name="アプリ評価",
+        line=dict(color="#EA580C", width=3),
+        marker=dict(size=8),
+        hovertemplate=(
+            "%{x|%m/%d}<br>"
+            "アプリ評価：%{y:.1f} / 100"
+            "<extra></extra>"
+        ),
+    ))
+
+    base_layout(fig_compare, 380)
+    fig_compare.update_layout(
+        title=dict(
+            text="日ごとのストレス評価の比較",
+            x=0,
+            xanchor="left",
+            y=0.98,
+            yanchor="top",
+        ),
+        margin=dict(t=100, b=80),
+        xaxis_title="日付",
+        yaxis_title="ストレス評価",
+        legend=dict(
+            orientation="h",
+            y=-0.2,
+            x=0.5,
+            xanchor="center",
+        ),
+        hovermode="x unified",
+    )
+
+    fig_compare.update_yaxes(
+        range=[0, 100],
+        tickvals=[0, 25, 50, 75, 100],
+        gridcolor="rgba(75,63,94,.08)",
+        zeroline=False,
+    )
+    fig_compare.update_xaxes(
+        tickformat="%m/%d",
+        showgrid=False,
+    )
+
+    st.plotly_chart(
+        fig_compare,
+        use_container_width=True,
+        config=PLOT_CONFIG,
+    )
+
+    st.caption(
+        "主観評価は1～5の値を0～100に換算しています。"
+        "2本の線の推移を比較し、評価の違いを確認できます。"
+    )
+
+
+# ---------------------------------------------------------
+# Tab 4: 履歴データ
+# ---------------------------------------------------------
+with tab4:
+    st.subheader("📒 これまでの記録")
+    df_view = st.session_state.df.sort_values("日付", ascending=False).copy()
+    risk_icon = {"良好": "🟢 良好", "中リスク": "🟡 中リスク", "高リスク": "🔴 高リスク"}
+    df_view["リスク判定"] = df_view["リスク判定"].map(risk_icon)
+    df_view["ストレス要因"] = [f"{FACTOR_EMOJI.get(f, '☁️')} {f}" for f in df_view["ストレス要因"]]
+    st.dataframe(
+        df_view,
+        column_config={
+            "日付": st.column_config.DateColumn("日付", format="MM/DD"),
+            "歩数": st.column_config.NumberColumn("歩数", format="%d 歩"),
+            "睡眠時間": st.column_config.NumberColumn("睡眠", format="%.1f h"),
+            "主観ストレス度": st.column_config.NumberColumn("気分(1-5)"),
+            "ストレス指標": st.column_config.ProgressColumn("ストレス指標", min_value=0, max_value=100, format="%.1f"),
+        },
+        use_container_width=True,
+        hide_index=True,
+    )

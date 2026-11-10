@@ -16,8 +16,8 @@ st.set_page_config(
 )
 
 FONT = "'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'Yu Gothic', sans-serif"
-INK = "#4B3F5E"       # 本文（黒ではなく濃い梅色）
-MUTED = "#7C718A"     # 補助テキスト
+INK = "#4B3F5E"     # 本文（濃い梅色）
+MUTED = "#7C718A"    # 補助テキスト
 PLUM = "#8E6BE8"      # アクセント（ラベンダー）
 MILK = "#FFF7F5"      # 背景（ミルクピンク）
 
@@ -41,20 +41,9 @@ FACTOR_EMOJI = {
 }
 PASTELS = ["#C9B6FF", "#FFC6D9", "#BFEBD7", "#FFE2A8", "#BFE0FF", "#FFD0B5"]
 
+# 全てのCSSスタイルを1つのst.markdownにまとめ、中括弧をエスケープ
 st.markdown(f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700&display=swap');
-
-.stApp {{ background-color: {MILK}; color: {INK}; }}
-.stApp, .stApp p, .stApp label, .stApp h1, .stApp h2, .stApp h3,
-.stApp button, .stApp input, .stApp textarea, .stMarkdown, [data-testid="stSidebar"] * :not(span[data-testid="stIconMaterial"]) {{
-    font-family: {FONT};
-}}
-.stApp h3 {{ color: {INK}; font-weight: 700; font-size: 1.15rem; letter-spacing: .02em; }}
-.block-container {{ padding-top: 2.2rem; padding-bottom: 4rem; }}
-#MainMenu, footer {{ visibility: hidden; }}
-header[data-testid="stHeader"] {{ background: transparent; }}
-
 /* ---- ヘッダー ---- */
 .app-head {{ display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }}
 .app-emoji {{ width: 52px; height: 52px; border-radius: 18px; background: #F0E6FF;
@@ -154,7 +143,7 @@ def fmt_date(d) -> str:
 
 
 # ---------------------------------------------------------
-# 2. ロジック関数群（元のまま）
+# 2. ロジック関数群
 # ---------------------------------------------------------
 def analyze_text_sentiment(text: str) -> float:
     if not text:
@@ -260,35 +249,22 @@ def predict_tomorrow_stress(df: pd.DataFrame) -> dict:
 
 
 # ---------------------------------------------------------
-# 3. データ初期化
+# 3. データ初期化（サンプルなしのクリーンな状態からスタート）
 # ---------------------------------------------------------
 if "df" not in st.session_state:
     today = datetime.now().date()
-    sample_data = []
-    sample_memos = [
-        "就活の面接があって緊張した",
-        "良く眠れた！卒研も進んで楽しかった",
-        "課題とES提出が多くて疲れた",
-        "散歩してスッキリ！",
-        "寝不足で頭痛がする…",
-        "ゼミの発表が順調に進んだ",
-        "普通の一日",
-    ]
-    for i in range(6, -1, -1):
-        d = today - timedelta(days=i)
-        sample_data.append({
-            "日付": d,
-            "歩数": [6500, 8200, 3400, 9100, 4500, 7800, 5200][6 - i],
-            "睡眠時間": [6.5, 7.5, 5.0, 8.0, 5.5, 7.0, 6.0][6 - i],
-            "主観ストレス度": [3, 2, 4, 1, 4, 2, 3][6 - i],
-            "メモ": sample_memos[6 - i],
-        })
-    df_init = pd.DataFrame(sample_data)
-    scores = [calculate_health_scores(r["歩数"], r["睡眠時間"], r["主観ストレス度"], r["メモ"]) for _, r in df_init.iterrows()]
-    df_init["ストレス指標"] = [s["stress_index"] for s in scores]
-    df_init["リスク判定"] = [s["risk_level"] for s in scores]
-    df_init["ストレス要因"] = [s["factor"] for s in scores]
-    st.session_state.df = df_init
+    # 初回は架空のサンプルデータを入れず、今日の初期行1件のみにする
+    initial_entry = {
+        "日付": today,
+        "歩数": 0,
+        "睡眠時間": 0.0,
+        "主観ストレス度": 3,
+        "メモ": "まだ記録がありません。サイドバーからきょうの記録を入力してみましょう！",
+        "ストレス指標": 50.0,
+        "リスク判定": "良好",
+        "ストレス要因": "その他・特になし",
+    }
+    st.session_state.df = pd.DataFrame([initial_entry])
 
 # ---------------------------------------------------------
 # 4. サイドバー：日次データ入力フォーム
@@ -395,11 +371,8 @@ with tab1:
 
     st.subheader("🔔 お知らせ・今日のアドバイス")
 
-    # 最新の記録を取得
     df_today = st.session_state.df.sort_values("日付")
     latest_row = df_today.iloc[-1]
-
-    # 警告を表示
     warnings = detect_early_warnings(df_today)
 
     if warnings:
@@ -415,9 +388,7 @@ with tab1:
             '</div>'
         )
 
-    # 記録に応じたアドバイスを作成
     advice = []
-
     if latest_row["ストレス指標"] >= 70:
         advice.append(
             "🌿 ストレス指標が高めです。"
@@ -434,19 +405,18 @@ with tab1:
             "無理のない生活リズムを続けてみましょう。"
         )
 
-    if latest_row["睡眠時間"] < 6:
+    if latest_row["睡眠時間"] < 6 and latest_row["睡眠時間"] > 0:
         advice.append(
             "🌙 睡眠時間が短めです。"
             "今夜は早めに休めるようにしてみましょう。"
         )
 
-    if latest_row["歩数"] < 4000:
+    if latest_row["歩数"] < 4000 and latest_row["歩数"] > 0:
         advice.append(
             "🚶 歩数が少なめです。体調に合わせて、"
             "軽いストレッチや短い散歩を取り入れてみましょう。"
         )
 
-    # アドバイスをカード形式で表示
     render(
         '<div class="alert alert-ok">'
         '<strong>💡 今日できるセルフケア</strong><br>'
@@ -454,14 +424,8 @@ with tab1:
         + "</div>"
     )
 
-    render(
-        '<div class="note">'
-        '※ 表示は記録に基づく一般的なセルフケアの目安です。'
-        '医療的な診断ではありません。'
-        '</div>'
-    )
+    render('<div class="note">※ 表示は記録に基づく一般的なセルフケアの目安です。医療的な診断ではありません。</div>')
 
-    render('<div class="note">※ 目安としての表示で、医療的な診断ではありません。</div>')
 
 # ---------------------------------------------------------
 # Tab 2: ストレス予測 & シミュレーター
@@ -498,6 +462,7 @@ with tab2:
     <div class="result-sub"><span class="pill">{diff_text}</span></div>
     </div>
     """)
+
 
 # ---------------------------------------------------------
 # Tab 3: 原因の内訳 & 推移
@@ -567,23 +532,15 @@ with tab3:
     </div>
     """)
 
-
-# ---------------------------------------------------------
-# 主観ストレス評価とアプリ評価の比較
-# ---------------------------------------------------------
     st.subheader("📊 主観ストレスとアプリ評価の比較")
 
-    # 日付順に並べる
     df_compare = df_chart.sort_values("日付").copy()
-
-    # 主観評価（1～5）を0～100に換算
     df_compare["主観評価換算"] = (
         (df_compare["主観ストレス度"] - 1) / 4 * 100
     )
 
     fig_compare = go.Figure()
 
-    # 本人が感じたストレス
     fig_compare.add_trace(go.Scatter(
         x=df_compare["日付"],
         y=df_compare["主観評価換算"],
@@ -600,7 +557,6 @@ with tab3:
         ),
     ))
 
-    # アプリが算出したストレス指標
     fig_compare.add_trace(go.Scatter(
         x=df_compare["日付"],
         y=df_compare["ストレス指標"],
@@ -615,22 +571,18 @@ with tab3:
         ),
     ))
 
-    # グラフの表示設定
     base_layout(fig_compare, 380)
-
-    
     fig_compare.update_layout(
         title=dict(
-        text="日ごとのストレス評価の比較",
-        x=0,
-        xanchor="left",
-        y=0.98,
-        yanchor="top",
-    ),
-    margin=dict(t=100, b=80),
-    xaxis_title="日付",
-    yaxis_title="ストレス評価",
-
+            text="日ごとのストレス評価の比較",
+            x=0,
+            xanchor="left",
+            y=0.98,
+            yanchor="top",
+        ),
+        margin=dict(t=100, b=80),
+        xaxis_title="日付",
+        yaxis_title="ストレス評価",
         legend=dict(
             orientation="h",
             y=-0.2,
@@ -646,7 +598,6 @@ with tab3:
         gridcolor="rgba(75,63,94,.08)",
         zeroline=False,
     )
-
     fig_compare.update_xaxes(
         tickformat="%m/%d",
         showgrid=False,
@@ -662,7 +613,7 @@ with tab3:
         "主観評価は1～5の値を0～100に換算しています。"
         "2本の線の推移を比較し、評価の違いを確認できます。"
     )
-    
+
 
 # ---------------------------------------------------------
 # Tab 4: 履歴データ

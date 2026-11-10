@@ -4,9 +4,10 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+from supabase import create_client, Client
 
 # ---------------------------------------------------------
-# 1. ページ設定 & デザイントークン
+# 1. ページ設定 & Supabase接続
 # ---------------------------------------------------------
 st.set_page_config(
     page_title="ストレス分析ヘルスケア",
@@ -15,13 +16,23 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# StreamlitのSecrets（またはRenderの環境変数）からSupabaseの接続情報を取得
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+
+@st.cache_resource
+def init_connection():
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+supabase: Client = init_connection()
+
 FONT = "'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'Yu Gothic', sans-serif"
-INK = "#4B3F5E"     # 本文（濃い梅色）
+INK = "#4B3F5E"    # 本文（濃い梅色）
 MUTED = "#7C718A"    # 補助テキスト
 PLUM = "#8E6BE8"      # アクセント（ラベンダー）
 MILK = "#FFF7F5"      # 背景（ミルクピンク）
 
-# 状態ごとの色・表情・ひとこと
+# 状態ごనిごとの色・表情・ひとこと
 STATUS = {
     "green": dict(main="#5CC9A0", soft="#E4F7EE", face="😊", title="いい調子！",
                   msg="このペースを保てるといいね。"),
@@ -41,17 +52,15 @@ FACTOR_EMOJI = {
 }
 PASTELS = ["#C9B6FF", "#FFC6D9", "#BFEBD7", "#FFE2A8", "#BFE0FF", "#FFD0B5"]
 
-# 全てのCSSスタイルを1つのst.markdownにまとめ、中括弧をエスケープ
+# CSSスタイル
 st.markdown(f"""
 <style>
-/* ---- ヘッダー ---- */
 .app-head {{ display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }}
 .app-emoji {{ width: 52px; height: 52px; border-radius: 18px; background: #F0E6FF;
     display: grid; place-items: center; font-size: 1.7rem; }}
 .app-title {{ font-size: 1.5rem; font-weight: 700; color: {INK}; line-height: 1.2; }}
 .app-sub {{ font-size: .85rem; color: {MUTED}; margin-top: 2px; }}
 
-/* ---- タブ（ピル型） ---- */
 .stTabs [data-baseweb="tab-list"] {{ gap: 4px; background: #fff; padding: 5px; border-radius: 99px;
     border: 2px solid #FFE3EA; }}
 .stTabs [data-baseweb="tab"] {{ flex: 1; height: 40px; border-radius: 99px; padding: 0 8px;
@@ -60,7 +69,6 @@ st.markdown(f"""
 .stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] {{ display: none; }}
 .stTabs [data-baseweb="tab-panel"] {{ padding-top: 1.2rem; }}
 
-/* ---- ヒーローカード ---- */
 .hero {{ display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 22px;
     border-radius: 32px; padding: 24px 20px; margin-bottom: 14px; }}
 .ring {{ width: 140px; height: 140px; border-radius: 50%; display: grid; place-items: center; flex: none; }}
@@ -75,7 +83,6 @@ st.markdown(f"""
 .pill {{ display: inline-block; padding: 4px 14px; border-radius: 99px; background: #fff;
     font-size: .85rem; font-weight: 700; color: {INK}; }}
 
-/* ---- 歩数・睡眠カード ---- */
 .grid2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }}
 .stat {{ background: #fff; border: 2px solid #FFE9EF; border-radius: 22px; padding: 16px; }}
 .stat-head {{ display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }}
@@ -87,32 +94,12 @@ st.markdown(f"""
 .bar > i {{ display: block; height: 100%; border-radius: 99px; }}
 .stat-sub {{ font-size: .8rem; color: {MUTED}; }}
 
-/* ---- メモカード & タグ ---- */
 .memo {{ background: #fff; border: 2px dashed #E7D9F5; border-radius: 22px; padding: 16px 18px; margin-bottom: 14px; }}
 .memo-label {{ font-size: .85rem; font-weight: 700; color: {MUTED}; margin-bottom: 6px; }}
 .memo-text {{ font-size: 1rem; color: {INK}; line-height: 1.7; margin-bottom: 10px; }}
 .chip {{ display: inline-block; padding: 4px 12px; border-radius: 99px; background: #F0E6FF;
     font-size: .82rem; font-weight: 700; color: {INK}; }}
 
-/* ---- アラート ---- */
-.alert {{ border-radius: 18px; padding: 14px 16px; margin-bottom: 10px; font-size: .95rem;
-    line-height: 1.6; color: {INK}; }}
-.alert-warn {{ background: #FFE3EA; }}
-.alert-ok {{ background: #E4F7EE; }}
-
-/* ---- 予測・結果カード ---- */
-.result {{ border-radius: 26px; padding: 20px; margin: 6px 0 14px; }}
-.result-label {{ font-size: .85rem; font-weight: 700; color: {MUTED}; margin-bottom: 4px; }}
-.result-value {{ font-size: 2.2rem; font-weight: 700; color: {INK}; line-height: 1.1; }}
-.result-value small {{ font-size: .9rem; font-weight: 500; color: {MUTED}; }}
-.result-sub {{ margin-top: 10px; }}
-
-/* ---- 凡例 ---- */
-.legend {{ display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }}
-.legend span {{ padding: 3px 12px; border-radius: 99px; font-size: .78rem; font-weight: 700; color: {INK}; }}
-.note {{ font-size: .78rem; color: {MUTED}; margin-top: 18px; text-align: center; }}
-
-/* ---- ウィジェット ---- */
 [data-testid="stSidebar"] {{ background: #FFEFF4; }}
 .stButton > button[kind="primary"], button[data-testid="stBaseButton-primary"] {{
     background: {PLUM}; border: none; border-radius: 99px; color: #fff; font-weight: 700; padding: .6rem 1rem; }}
@@ -122,24 +109,6 @@ st.markdown(f"""
 [data-testid="stDataFrame"] {{ border-radius: 20px; overflow: hidden; border: 2px solid #FFE9EF; }}
 </style>
 """, unsafe_allow_html=True)
-
-
-def render(markup: str):
-    """インデントや空行でMarkdownに誤解されないようHTMLを整形して描画"""
-    cleaned = "\n".join(line.strip() for line in markup.strip().splitlines() if line.strip())
-    st.markdown(cleaned, unsafe_allow_html=True)
-
-
-def status_of(score: float) -> str:
-    if score >= 70:
-        return "red"
-    if score >= 45:
-        return "orange"
-    return "green"
-
-
-def fmt_date(d) -> str:
-    return f"{d.month}/{d.day}"
 
 
 # ---------------------------------------------------------
@@ -214,65 +183,20 @@ def calculate_health_scores(steps: int, sleep: float, stress_level: int, memo: s
     }
 
 
-def detect_early_warnings(df: pd.DataFrame) -> list:
-    warnings = []
-    if len(df) >= 2 and all(df.iloc[-2:]["ストレス指標"] >= 60):
-        warnings.append("🚨 【連続高ストレス警告】2日以上高ストレス状態です。意識的な休息を取りましょう。")
-    if len(df) >= 3:
-        avg_sleep = df.iloc[-3:]["睡眠時間"].mean()
-        if avg_sleep < 6.0:
-            warnings.append(f"⚠️ 【睡眠負債】直近3日の平均睡眠時間は {avg_sleep:.1f} 時間です。")
-        if df.iloc[-3:]["歩数"].mean() < 4000:
-            warnings.append("🚶‍♂️ 【運動不足】軽いストレッチや散歩をおすすめします。")
-    return warnings
-
-
-def predict_tomorrow_stress(df: pd.DataFrame) -> dict:
-    if len(df) < 3:
-        return {"predicted_score": 50.0, "trend": "データ不足（横ばい推測）"}
-
-    recent_df = df.tail(5)
-    x = np.arange(len(recent_df))
-    y = recent_df["ストレス指標"].values
-
-    slope, intercept = np.polyfit(x, y, 1)
-    predicted_val = round(max(0.0, min(100.0, float(slope * len(recent_df) + intercept))), 1)
-
-    if slope > 3.0:
-        trend = "上昇傾向 ↗️"
-    elif slope < -3.0:
-        trend = "改善傾向 ↘️"
-    else:
-        trend = "安定 ➡️"
-
-    return {"predicted_score": predicted_val, "trend": trend}
-
-
 # ---------------------------------------------------------
-# 3. 認証 & ユーザー別データの初期化（ここに置き換え）
+# 3. 認証状態の初期化
 # ---------------------------------------------------------
-# パスワード認証用のユーザーリスト
-USER_CREDENTIALS = {
-    "user_A": "password123",
-    "user_B": "secret456",
-    "test_user": "testpass"
-}
-
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.current_user = ""
 
-# ユーザーごとのデータフレームを保持する辞書
-if "user_databases" not in st.session_state:
-    st.session_state.user_databases = {}
-
 
 # =========================================================
-# 4. 未ログイン時の画面（ログインフォーム）
+# 4. 未ログイン時の画面（固定ID・パスワードでのログイン）
 # =========================================================
 if not st.session_state.logged_in:
     st.title("🔐 ログイン認証")
-    st.write("ストレス可視化セルフケア支援システムをご利用の際は、IDとパスワードを入力してください。")
+    st.write("システムをご利用の際は、指定されたユーザーIDとパスワードを入力してください。")
     
     with st.form("login_form"):
         input_user = st.text_input("ユーザーID")
@@ -280,27 +204,20 @@ if not st.session_state.logged_in:
         submit_btn = st.form_submit_button("ログイン")
         
         if submit_btn:
-            if input_user in USER_CREDENTIALS and USER_CREDENTIALS[input_user] == input_pass:
+            # Supabaseの users テーブルから指定されたIDを検索
+            response = supabase.table("users").select("*").eq("username", input_user).execute()
+            user_rows = response.data
+            
+            if user_rows and user_rows[0]["password"] == input_pass:
                 st.session_state.logged_in = True
                 st.session_state.current_user = input_user
-                
-                # ログインしたユーザーのデータがまだなければ初期データを作る
-                if input_user not in st.session_state.user_databases:
-                    today = datetime.now().date()
-                    initial_entry = {
-                        "日付": today, "歩数": 0, "睡眠時間": 0.0, "主観ストレス度": 3,
-                        "メモ": "まだ記録がありません。サイドバーから今日の記録を入力してみましょう！",
-                        "ストレス指標": 50.0, "リスク判定": "良好", "ストレス要因": "その他・特になし",
-                    }
-                    st.session_state.user_databases[input_user] = pd.DataFrame([initial_entry])
-                
                 st.success("ログインに成功しました！まもなく画面が切り替わります。")
                 st.rerun()
             else:
                 st.error("⚠️ ユーザーIDまたはパスワードが間違っています。")
 
 # =========================================================
-# 5. ログイン成功後のメインアプリ画面（元のUIやタブ、サイドバー）
+# 5. ログイン成功後のメインアプリ画面
 # =========================================================
 else:
     user = st.session_state.current_user
@@ -312,24 +229,104 @@ else:
         st.session_state.current_user = ""
         st.rerun()
 
-    # 1. もしログイン中ユーザーのデータ箱がまだなければ、初期データを作成して用意する
-    if user not in st.session_state.user_databases:
+    # --- Supabaseからこのユーザーのデータを取得 ---
+    db_res = supabase.table("stress_records").select("*").eq("username", user).execute()
+    
+    if db_res.data:
+        user_df = pd.DataFrame(db_res.data)
+        # 列名（英語/日本語）の整合性を調整
+        if "date" in user_df.columns:
+            user_df["日付"] = pd.to_datetime(user_df["date"]).dt.date
+        if "steps" in user_df.columns:
+            user_df["歩数"] = user_df["steps"]
+        if "sleep" in user_df.columns:
+            user_df["睡眠時間"] = user_df["sleep"]
+        if "stress_level" in user_df.columns:
+            user_df["主観ストレス度"] = user_df["stress_level"]
+        if "stress_index" in user_df.columns:
+            user_df["ストレス指標"] = user_df["stress_index"]
+        if "risk_level" in user_df.columns:
+            user_df["リスク判定"] = user_df["risk_level"]
+        if "stress_factor" in user_df.columns:
+            user_df["ストレス要因"] = user_df["stress_factor"]
+    else:
+        # まだ記録がなければ初期データを作成してSupabaseに保存
         today = datetime.now().date()
         initial_entry = {
-            "日付": today,
-            "歩数": 0,
-            "睡眠時間": 0.0,
-            "主観ストレス度": 3,
-            "メモ": "まだ記録がありません。サイドバーから今日の記録を入力してみましょう！",
-            "ストレス指標": 50.0,
-            "リスク判定": "良好",
-            "ストレス要因": "その他・特になし",
+            "username": user,
+            "date": str(today),
+            "steps": 0,
+            "sleep": 0.0,
+            "stress_level": 3,
+            "memo": "まだ記録がありません。サイドバーから今日の記録を入力してみましょう！",
+            "stress_index": 50.0,
+            "risk_level": "良好",
+            "stress_factor": "その他・特になし",
         }
-        st.session_state.user_databases[user] = pd.DataFrame([initial_entry])
+        supabase.table("stress_records").insert(initial_entry).execute()
+        user_df = pd.DataFrame([{
+            "日付": today, "歩数": 0, "睡眠時間": 0.0, "主観ストレス度": 3,
+            "メモ": "まだ記録がありません。サイドバーから今日の記録を入力してみましょう！",
+            "ストレス指標": 50.0, "リスク判定": "良好", "ストレス要因": "その他・特になし"
+        }])
 
-    # 2. ★ここがポイント！
-    # ユーザーごとのデータを、元のUIがそのまま使える `st.session_state.df` に結びつける
-    st.session_state.df = st.session_state.user_databases[user]
+    # 元のUIでそのまま使えるように `st.session_state.df` に割り当てる
+    st.session_state.df = user_df
+
+    # ---------------------------------------------------------
+    # 6. サイドバー：日次データ入力フォーム
+    # ---------------------------------------------------------
+    st.sidebar.header("📝 きょうの記録")
+    input_date = st.sidebar.date_input("日付", datetime.now().date())
+    input_steps = st.sidebar.number_input("歩数", min_value=0, max_value=50000, value=7000, step=500)
+    input_sleep = st.sidebar.slider("睡眠時間 (時間)", min_value=0.0, max_value=12.0, value=7.0, step=0.5)
+    input_stress = st.sidebar.select_slider("気分・ストレス感 (1:低 ～ 5:高)", options=[1, 2, 3, 4, 5], value=3)
+    input_memo = st.sidebar.text_area("メモ / 日記", placeholder="例：面接が終わってホッとした。少し疲れた。")
+
+    if st.sidebar.button("💾 保存する", type="primary", use_container_width=True):
+        res = calculate_health_scores(input_steps, input_sleep, input_stress, input_memo)
+        
+        # Supabaseに保存するデータ辞書
+        new_record = {
+            "username": user,
+            "date": str(input_date),
+            "steps": int(input_steps),
+            "sleep": float(input_sleep),
+            "stress_level": int(input_stress),
+            "memo": input_memo,
+            "stress_index": float(res["stress_index"]),
+            "risk_level": str(res["risk_level"]),
+            "stress_factor": str(res["factor"]),
+        }
+        
+        # すでに同じ日付のデータがSupabaseにあるか確認してupsertまたはinsert
+        existing = supabase.table("stress_records").select("id").eq("username", user).eq("date", str(input_date)).execute()
+        if existing.data:
+            # 既存レコードを更新
+            rec_id = existing.data[0]["id"]
+            supabase.table("stress_records").update(new_record).eq("id", rec_id).execute()
+        else:
+            # 新規追加
+            supabase.table("stress_records").insert(new_record).execute()
+            
+        st.sidebar.success("クラウドに保存しました！画面を更新します。")
+        st.rerun()
+
+    # ---------------------------------------------------------
+    # 7. メイン画面の表示（元のUI・タブなどの続きをここに配置）
+    # ---------------------------------------------------------
+    st.title("🧠 ストレス分析ヘルスケア")
+    st.write(f"ようこそ、{user} さん！ あなた専用のストレス記録・分析画面です。")
+
+    # サンプルとして現在のデータフレームを表示
+    st.markdown("### 📊 あなたの記録一覧")
+    current_data = st.session_state.df
+    if not current_data.empty:
+        st.dataframe(current_data)
+        if "日付" in current_data.columns and "ストレス指標" in current_data.columns:
+            st.line_chart(current_data.set_index("日付")["ストレス指標"])
+    else:
+        st.info("まだ記録がありません。")
 
 # ---------------------------------------------------------
 # 4. サイドバー：日次データ入力フォーム

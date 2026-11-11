@@ -17,8 +17,8 @@ st.set_page_config(
 )
 
 # StreamlitのSecrets（またはRender等の環境変数）からSupabase接続情報を取得
-SUPABASE_URL = st.secrets["https://pcitjjilqqjgpwnrlbco.supabase.co"]
-SUPABASE_KEY = st.secrets["sb_publishable_hEjcnqHZ8r8-PC0ZnVFUoA_ks5FdY6f"]
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 @st.cache_resource
 def init_connection():

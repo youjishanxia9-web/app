@@ -16,9 +16,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# StreamlitのSecrets（またはRender等の環境変数）からSupabase接続情報を取得
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+import os
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 @st.cache_resource
 def init_connection():
